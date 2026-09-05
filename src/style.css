@@ -137,3 +137,184 @@ body {
     gap: 8px 14px;
   }
 }
+
+/* ---- controls ---------------------------------------------------------- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 26px;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.group > legend {
+  padding: 0 0 5px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.group-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Radios stay in the accessibility tree and keep arrow-key navigation;
+   only their default painting is replaced by the label chip. */
+.choices input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.choices label,
+.preset {
+  display: inline-block;
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.choices label:hover,
+.preset:hover {
+  border-color: #b9c0c8;
+}
+
+.choices input[type="radio"]:checked + label {
+  border-color: #14181c;
+  background: #14181c;
+  color: #fff;
+}
+
+.choices input[type="radio"]:focus-visible + label,
+.preset:focus-visible,
+.play:focus-visible,
+.year:focus-visible,
+.field input:focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: 2px;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash {
+  color: var(--muted);
+}
+
+.field input {
+  width: 5.5em;
+  padding: 5px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.playbar {
+  display: flex;
+  flex: 1 1 340px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.play {
+  flex: none;
+  min-width: 5.2em;
+  padding: 6px 12px;
+  border: 1px solid #14181c;
+  border-radius: 4px;
+  background: #14181c;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.speed {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* 1x / 2x / 4x stay on one line; they are too short to be worth wrapping. */
+.speed .choices {
+  flex-wrap: nowrap;
+}
+
+.speed-label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.year {
+  flex: 1 1 160px;
+  min-width: 120px;
+  accent-color: #14181c;
+}
+
+.readout {
+  flex: none;
+  min-width: 3.4em;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .controls {
+    gap: 10px 18px;
+    padding: 12px;
+  }
+
+  /* Play and speed on one row, the year slider on its own below them. */
+  .playbar {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .year {
+    flex: 1 1 60%;
+  }
+}

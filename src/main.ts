@@ -1,40 +1,40 @@
 /**
- * Step 2: the default view, drawn once. No controls yet.
+ * Step 3: controls, client-side recompute and URL state.
  *
- * World, Equal Earth, the mean of 2020-2024 against the 1951-1980 baseline,
- * on a blue-grey-red ramp clamped at +/-2 degC.
+ * Work is split by what actually changed. The lookup and the coastlines depend
+ * only on the canvas size and the region, so they survive a year change; a year,
+ * baseline, window or scale change costs one field recompute and one repaint.
  */
 
 import type { GeoPermissibleObjects } from "d3-geo";
 import { feature } from "topojson-client";
 
+import { mountControls, Player } from "./controls.js";
 import { buildPrefixSums, computeField, fieldGlobalMean, DEFAULT_MIN_COVERAGE } from "./compute.js";
-import { loadGistemp, type GistempData } from "./data.js";
+import { loadGistemp } from "./data.js";
 import { buildPalette, MISSING_RGB } from "./palette.js";
 import {
   assertPseudocylindrical,
   buildLookup,
-  createProjection,
   drawOutlines,
-  fitProjection,
   paintField,
+  projectionFor,
 } from "./render.js";
+import {
+  clampYear,
+  nextYear,
+  parseHash,
+  serialiseHash,
+  type RecordLimits,
+  type ViewState,
+} from "./url.js";
 import "./style.css";
-
-/** The default view from the brief. Step 3 makes these adjustable. */
-const VIEW = {
-  baselineStart: 1951,
-  baselineEnd: 1980,
-  windowYears: 5,
-  year: 2024,
-  minCoverage: DEFAULT_MIN_COVERAGE,
-} as const;
-
-/** The ramp saturates here, so +2 degC and +4 degC look the same. */
-const LIMIT = 2;
 
 /** Above this the lookup and the ImageData cost more than the sharpness is worth. */
 const MAX_DPR = 2;
+
+/** Milliseconds per year at 1x. 4x lands at 25 ms, past what a repaint costs. */
+const PLAY_INTERVAL = 100;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -57,14 +57,13 @@ async function loadLand(base: string): Promise<GeoPermissibleObjects> {
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
 
   const topology = (await response.json()) as LandTopology;
-  const collection = feature(
+  return feature(
     topology as never,
     topology.objects.land as never,
   ) as unknown as GeoPermissibleObjects;
-  return collection;
 }
 
-function renderLegend(host: HTMLElement, lut: Uint8ClampedArray): void {
+function renderLegend(host: HTMLElement, lut: Uint8ClampedArray, limit: number): void {
   const steps = lut.length / 3;
   const stops: string[] = [];
   for (let i = 0; i <= 20; i++) {
@@ -80,14 +79,14 @@ function renderLegend(host: HTMLElement, lut: Uint8ClampedArray): void {
   bar.setAttribute("role", "img");
   bar.setAttribute(
     "aria-label",
-    `Colour scale from ${LIMIT} degrees Celsius cooler, through no change, to ${LIMIT} degrees warmer`,
+    `Colour scale from ${limit} degrees Celsius cooler, through no change, to ${limit} degrees warmer`,
   );
 
   const ticks = document.createElement("div");
   ticks.className = "ramp-ticks";
-  for (const value of [-LIMIT, -LIMIT / 2, 0, LIMIT / 2, LIMIT]) {
+  for (const value of [-limit, -limit / 2, 0, limit / 2, limit]) {
     const tick = document.createElement("span");
-    tick.textContent = value === 0 ? "0" : `${formatSigned(value).replace(".00", "")} °C`;
+    tick.textContent = value === 0 ? "0" : `${formatSigned(value).replace(/\.00$/, "")} °C`;
     ticks.append(tick);
   }
 
@@ -105,11 +104,12 @@ function renderLegend(host: HTMLElement, lut: Uint8ClampedArray): void {
   host.append(ramp, missing);
 }
 
-function describe(data: GistempData, field: Float32Array): string {
-  const from = VIEW.year - VIEW.windowYears + 1;
-  const mean = fieldGlobalMean(field, data.meta.lats, data.nLons);
+function describe(state: ViewState, mean: number): string {
+  const from = state.year - state.windowYears + 1;
+  const window =
+    state.windowYears === 1 ? `${state.year}` : `mean of ${from}–${state.year}`;
   return (
-    `${VIEW.year} — mean of ${from}–${VIEW.year} vs ${VIEW.baselineStart}–${VIEW.baselineEnd}. ` +
+    `${state.year} — ${window} vs ${state.baselineStart}–${state.baselineEnd}. ` +
     `Global average ${formatSigned(mean)} °C.`
   );
 }
@@ -119,17 +119,11 @@ async function start(): Promise<void> {
   const [data, land] = await Promise.all([loadGistemp(base), loadLand(base)]);
 
   const prefix = buildPrefixSums(data);
-  const field = computeField(data, prefix, VIEW);
   const lut = buildPalette();
-
-  element("caption").textContent = describe(data, field);
-  element("source").textContent =
-    `Data: ${data.meta.source}. ${data.meta.licence} Built ${data.meta.built_at}.`;
-  renderLegend(element("legend"), lut);
-
-  const host = element("map");
-  const fieldCanvas = element<HTMLCanvasElement>("field");
-  const outlineCanvas = element<HTMLCanvasElement>("outlines");
+  const limits: RecordLimits = {
+    firstYear: data.meta.years[0] ?? 0,
+    lastYear: data.meta.years[data.nYears - 1] ?? 0,
+  };
   const grid = {
     lats: data.meta.lats,
     lons: data.meta.lons,
@@ -137,20 +131,35 @@ async function start(): Promise<void> {
     nLons: data.nLons,
   };
 
-  // Nothing depends on the viewport but the lookup, so redraw only when the
-  // pixel size actually changes — a resize that rounds to the same canvas is free.
-  let lastSize = "";
+  let state = parseHash(window.location.hash, limits);
 
-  function draw(): void {
-    if (host.clientWidth < 2 || host.clientHeight < 2) return;
+  const host = element("map");
+  const fieldCanvas = element<HTMLCanvasElement>("field");
+  const outlineCanvas = element<HTMLCanvasElement>("outlines");
+  const caption = element("caption");
+  const legend = element("legend");
+
+  element("source").textContent =
+    `Data: ${data.meta.source}. ${data.meta.licence} Built ${data.meta.built_at}.`;
+  element("coverage").textContent =
+    `A cell is left grey unless at least ${Math.round(DEFAULT_MIN_COVERAGE * 100)}% of the years in both its window and its baseline have data.`;
+
+  // Rebuilt only when the canvas size or the region changes.
+  let lookup: Int32Array | null = null;
+  let image: ImageData | null = null;
+  let layoutKey = "";
+  let currentLimit = -1;
+
+  function layout(): boolean {
+    if (host.clientWidth < 2 || host.clientHeight < 2) return false;
 
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     const width = Math.round(host.clientWidth * dpr);
     const height = Math.round(host.clientHeight * dpr);
 
-    const size = `${width}x${height}`;
-    if (size === lastSize) return;
-    lastSize = size;
+    const key = `${width}x${height}:${state.region}`;
+    if (key === layoutKey) return lookup !== null;
+    layoutKey = key;
 
     for (const canvas of [fieldCanvas, outlineCanvas]) {
       canvas.width = width;
@@ -161,23 +170,102 @@ async function start(): Promise<void> {
     const outlineCtx = outlineCanvas.getContext("2d");
     if (!fieldCtx || !outlineCtx) throw new Error("no 2d canvas context");
 
-    const projection = fitProjection(createProjection(), width, height);
+    const projection = projectionFor(state.region, width, height);
     assertPseudocylindrical(projection);
 
-    const lookup = buildLookup(projection, width, height, grid);
-    const image = fieldCtx.createImageData(width, height);
-    paintField(image, field, lookup, lut, LIMIT);
-    fieldCtx.putImageData(image, 0, 0);
-
-    drawOutlines(outlineCtx, projection, land, dpr);
+    lookup = buildLookup(projection, width, height, grid);
+    image = fieldCtx.createImageData(width, height);
+    drawOutlines(outlineCtx, projection, land, dpr, state.region === "world");
+    return true;
   }
 
-  draw();
-  document.body.dataset["ready"] = "true";
+  function repaint(): void {
+    if (!layout() || !lookup || !image) return;
 
-  new ResizeObserver(() => draw()).observe(host);
+    performance.mark("repaint:start");
+
+    const field = computeField(data, prefix, {
+      baselineStart: state.baselineStart,
+      baselineEnd: state.baselineEnd,
+      windowYears: state.windowYears,
+      year: state.year,
+      minCoverage: DEFAULT_MIN_COVERAGE,
+    });
+
+    paintField(image, field, lookup, lut, state.limit);
+    fieldCanvas.getContext("2d")?.putImageData(image, 0, 0);
+
+    caption.textContent = describe(state, fieldGlobalMean(field, data.meta.lats, data.nLons));
+    if (state.limit !== currentLimit) {
+      currentLimit = state.limit;
+      renderLegend(legend, lut, state.limit);
+    }
+
+    performance.mark("repaint:end");
+    performance.measure("repaint", "repaint:start", "repaint:end");
+  }
+
+  const player = new Player(PLAY_INTERVAL, () => {
+    apply({ year: nextYear(state.year, limits, state.windowYears) });
+  });
+
+  const controls = mountControls(element("controls"), {
+    limits,
+    initial: state,
+    initialSpeed: 1,
+    onChange: (patch) => apply(patch),
+    onTogglePlay: () => {
+      player.toggle();
+      controls.setPlaying(player.playing);
+    },
+    onSpeed: (speed) => player.setSpeed(speed),
+  });
+
+  let hashWeWrote = "";
+
+  function apply(patch: Partial<ViewState>): void {
+    const merged: ViewState = { ...state, ...patch };
+    // A wider window can push the year below the first year it can cover.
+    state = { ...merged, year: clampYear(merged.year, limits, merged.windowYears) };
+
+    hashWeWrote = serialiseHash(state);
+    if (window.location.hash !== hashWeWrote) {
+      window.history.replaceState(null, "", hashWeWrote);
+    }
+
+    controls.sync(state);
+    repaint();
+  }
+
+  window.addEventListener("hashchange", () => {
+    // Only react to someone else's navigation, not to our own writes.
+    if (window.location.hash === hashWeWrote) return;
+    apply(parseHash(window.location.hash, limits));
+  });
+
+  // Space toggles playback, unless the focused control uses space itself.
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== " " && event.code !== "Space") return;
+
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const tag = target.tagName;
+      const typed = target instanceof HTMLInputElement && target.type !== "range";
+      if (tag === "BUTTON" || tag === "SELECT" || tag === "A" || typed) return;
+    }
+
+    event.preventDefault();
+    player.toggle();
+    controls.setPlaying(player.playing);
+  });
+
+  new ResizeObserver(() => repaint()).observe(host);
+
+  apply(state);
+  document.body.dataset["ready"] = "true";
 }
 
 start().catch((error: unknown) => {
-  element("caption").textContent = `Could not load the data: ${String(error)}`;
+  const caption = document.getElementById("caption");
+  if (caption) caption.textContent = `Could not load the data: ${String(error)}`;
 });

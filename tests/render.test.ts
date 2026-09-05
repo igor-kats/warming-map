@@ -9,6 +9,7 @@ import {
   fitProjection,
   OUTSIDE,
   paintField,
+  projectionFor,
 } from "../src/render.js";
 
 /** The GISTEMP grid: 2 degree cells, centres at -89..89 and -179..179. */
@@ -22,13 +23,14 @@ const grid = {
 const WIDTH = 410;
 const HEIGHT = 200;
 
-function projectionFor(width = WIDTH, height = HEIGHT) {
+/** The world projection at the test canvas size. */
+function worldProjection(width = WIDTH, height = HEIGHT) {
   return fitProjection(createProjection(), width, height);
 }
 
 describe("assertPseudocylindrical", () => {
   it("accepts Equal Earth", () => {
-    expect(() => assertPseudocylindrical(projectionFor())).not.toThrow();
+    expect(() => assertPseudocylindrical(worldProjection())).not.toThrow();
   });
 
   it("rejects a projection whose parallels are not rows", () => {
@@ -39,7 +41,7 @@ describe("assertPseudocylindrical", () => {
 });
 
 describe("buildLookup", () => {
-  const lookup = buildLookup(projectionFor(), WIDTH, HEIGHT, grid);
+  const lookup = buildLookup(worldProjection(), WIDTH, HEIGHT, grid);
 
   it("covers one entry per pixel", () => {
     expect(lookup).toHaveLength(WIDTH * HEIGHT);
@@ -96,7 +98,7 @@ describe("buildLookup", () => {
   });
 
   it("agrees with a per-pixel inverse, which is the slow reference", () => {
-    const projection = projectionFor();
+    const projection = worldProjection();
     const invert = projection.invert!;
     let checked = 0;
 
@@ -120,7 +122,7 @@ describe("buildLookup", () => {
 
   it("refuses a grid it cannot infer a step from", () => {
     expect(() =>
-      buildLookup(projectionFor(), 4, 4, { lats: [0], lons: [0], nLats: 1, nLons: 1 }),
+      buildLookup(worldProjection(), 4, 4, { lats: [0], lons: [0], nLats: 1, nLons: 1 }),
     ).toThrow(/at least two/);
   });
 });
@@ -208,6 +210,55 @@ describe("fitProjection", () => {
       expect(xy[0]).toBeLessThanOrEqual(800.5);
       expect(xy[1]).toBeGreaterThanOrEqual(-0.5);
       expect(xy[1]).toBeLessThanOrEqual(400.5);
+    }
+  });
+});
+
+describe("regions", () => {
+  const W = 800;
+  const H = 400;
+  const inside = (xy: [number, number] | null): boolean =>
+    xy !== null && xy[0] >= 0 && xy[0] <= W && xy[1] >= 0 && xy[1] <= H;
+
+  const LONDON: [number, number] = [-0.13, 51.5];
+  const CHICAGO: [number, number] = [-87.6, 41.9];
+  const SYDNEY: [number, number] = [151.2, -33.9];
+
+  it("shows the whole world in the world view", () => {
+    const projection = projectionFor("world", W, H);
+
+    for (const place of [LONDON, CHICAGO, SYDNEY]) {
+      expect(inside(projection(place))).toBe(true);
+    }
+  });
+
+  it("frames Europe and leaves the rest of the world off-canvas", () => {
+    const projection = projectionFor("eu", W, H);
+
+    expect(inside(projection(LONDON))).toBe(true);
+    expect(inside(projection(SYDNEY))).toBe(false);
+    expect(inside(projection(CHICAGO))).toBe(false);
+  });
+
+  it("frames North America and leaves the rest of the world off-canvas", () => {
+    const projection = projectionFor("na", W, H);
+
+    expect(inside(projection(CHICAGO))).toBe(true);
+    expect(inside(projection(LONDON))).toBe(false);
+    expect(inside(projection(SYDNEY))).toBe(false);
+  });
+
+  it("magnifies: a degree of longitude is bigger zoomed in than on the world map", () => {
+    const world = projectionFor("world", W, H);
+    const europe = projectionFor("eu", W, H);
+    const span = (p: ReturnType<typeof projectionFor>) => p([10, 50])![0] - p([9, 50])![0];
+
+    expect(span(europe)).toBeGreaterThan(span(world) * 3);
+  });
+
+  it("keeps the row-wise lookup valid for the zoomed projections", () => {
+    for (const region of ["eu", "na"] as const) {
+      expect(() => assertPseudocylindrical(projectionFor(region, W, H))).not.toThrow();
     }
   });
 });

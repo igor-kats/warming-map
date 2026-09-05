@@ -16,6 +16,8 @@
         <p class="subtitle" id="caption">Loading NASA GISTEMP…</p>
       </header>
 
+      <form class="controls" id="controls" aria-label="Map controls"></form>
+
       <figure class="map" id="map">
         <canvas id="field"></canvas>
         <canvas id="outlines"></canvas>
@@ -36,6 +38,8 @@
           Grey cells have no data. Before about 1950 the gaps are large and real — nobody was
           measuring there. A gap is not a zero.
         </p>
+        <p id="coverage"></p>
+        <p>Press space to play or pause. Every control is reachable with the keyboard.</p>
         <p class="source" id="source"></p>
         <p class="byline">
           Built by Igor Kats ·

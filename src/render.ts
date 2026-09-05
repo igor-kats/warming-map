@@ -16,7 +16,15 @@
  * loudly instead of drawing a plausible lie.
  */
 
-import { geoEqualEarth, geoPath, type GeoPermissibleObjects, type GeoProjection } from "d3-geo";
+import {
+  geoEqualEarth,
+  geoEquirectangular,
+  geoPath,
+  type GeoPermissibleObjects,
+  type GeoProjection,
+} from "d3-geo";
+
+import type { Region } from "./url.js";
 
 import { BACKGROUND_RGB, MISSING_RGB, paletteIndex } from "./palette.js";
 
@@ -37,19 +45,65 @@ export function createProjection(): GeoProjection {
   return geoEqualEarth();
 }
 
-/** Fit the projection to a canvas of this size, leaving a small margin. */
+/**
+ * What each region frames. The world gets Equal Earth, which is equal-area, so
+ * no part of the map is given more visual weight than its size on the ground.
+ * The two zooms get equirectangular, per the brief: over a continent the
+ * distortion is small and the straight graticule keeps latitudes comparable.
+ * Both families are pseudocylindrical, so the row-wise lookup holds for either.
+ */
+export const REGION_BOUNDS: Readonly<Record<Region, readonly [number, number, number, number] | null>> =
+  {
+    world: null,
+    eu: [-25, 33, 45, 72],
+    na: [-170, 13, -52, 74],
+  };
+
+/**
+ * The area a region should fill, as something fitExtent understands.
+ *
+ * The corners are given as a MultiPoint rather than a Polygon on purpose.
+ * d3-geo reads polygons spherically, so a ring wound the wrong way means the
+ * whole rest of the planet, and `fitExtent` then quietly fits the world instead
+ * of the region — a bug that looks like "the zoom does nothing". Points carry
+ * no winding, and for the equirectangular zooms a lat/lon rectangle's corners
+ * bound exactly the rectangle on screen.
+ */
+function regionExtent(region: Region): GeoPermissibleObjects {
+  const bounds = REGION_BOUNDS[region];
+  if (!bounds) return { type: "Sphere" } as GeoPermissibleObjects;
+
+  const [west, south, east, north] = bounds;
+  return {
+    type: "MultiPoint",
+    coordinates: [
+      [west, south],
+      [east, south],
+      [east, north],
+      [west, north],
+    ],
+  } as GeoPermissibleObjects;
+}
+
+/** A projection for `region`, already fitted to a canvas of this size. */
+export function projectionFor(region: Region, width: number, height: number): GeoProjection {
+  const projection = region === "world" ? geoEqualEarth() : geoEquirectangular();
+  return fitProjection(projection, width, height, regionExtent(region));
+}
+
+/** Fit the projection so `extent` fills a canvas of this size. */
 export function fitProjection(
   projection: GeoProjection,
   width: number,
   height: number,
-  margin = 0,
+  extent: GeoPermissibleObjects = { type: "Sphere" } as GeoPermissibleObjects,
 ): GeoProjection {
   return projection.fitExtent(
     [
-      [margin, margin],
-      [width - margin, height - margin],
+      [0, 0],
+      [width, height],
     ],
-    { type: "Sphere" },
+    extent,
   );
 }
 
@@ -192,6 +246,7 @@ export function drawOutlines(
   projection: GeoProjection,
   land: GeoPermissibleObjects,
   scale: number,
+  withSphere = true,
 ): void {
   const path = geoPath(projection, ctx);
 
@@ -205,11 +260,13 @@ export function drawOutlines(
   path(land);
   ctx.stroke();
 
-  ctx.lineWidth = 1 * scale;
-  ctx.strokeStyle = "rgba(20, 24, 28, 0.35)";
-  ctx.beginPath();
-  path({ type: "Sphere" });
-  ctx.stroke();
+  if (withSphere) {
+    ctx.lineWidth = 1 * scale;
+    ctx.strokeStyle = "rgba(20, 24, 28, 0.35)";
+    ctx.beginPath();
+    path({ type: "Sphere" });
+    ctx.stroke();
+  }
 
   ctx.restore();
 }

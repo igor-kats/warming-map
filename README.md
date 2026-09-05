@@ -6,9 +6,9 @@ No accounts, no tracking, no backend. See [the brief](docs/2026-09-05_warming-ma
 
 ## Status
 
-Step 2 of 4: the data pipeline, and the map drawn once in its default view —
-world, Equal Earth, the mean of 2020–2024 against a 1951–1980 baseline, on a
-blue–grey–red ramp clamped at ±2 °C. Controls are step 3.
+Step 3 of 4: the data pipeline, the map, and the controls — baseline, window,
+year, playback, colour scale and region, all recomputed in the browser and all
+carried in the URL. The hover panel and the Pages deploy are step 4.
 
 ![The default view at 1280px](docs/screenshots/world-1280.png)
 
@@ -103,6 +103,46 @@ GitHub Pages may do the same for `application/octet-stream`. If it does, first
 load is 4.7 MB rather than the ~2 MB the brief budgets for, and the fix at
 deploy time is to ship the binary pre-compressed and inflate it with
 `DecompressionStream` in the browser. Worth settling in step 4.
+
+### Controls and URL state
+
+Every view is a hash: `#b=1951-1980&w=5&y=2016&r=eu&p=2` — baseline, window,
+year, region, palette limit. The page restores it on load, rewrites it on every
+change (with `replaceState`, so the back button is not filled with every drag of
+the slider), and follows it if someone edits it. Parsing never throws and never
+warns: each field falls back on its own, so a bad `w` does not cost you a good
+`y`, and a year outside the record is clamped rather than discarded.
+
+Playback is deliberately *not* in the hash. It is how you are looking, not what
+you are looking at, and a shared link should not start animating at 4× on
+arrival.
+
+The year slider's floor moves with the window: a 5-year window cannot end before
+1884, because a window that reaches past the start of the record would be under
+60% covered and the map would be blank.
+
+Every control is a native input — radios, a range, number fields, buttons — so
+keyboard support, focus order and screen-reader semantics come from the browser.
+Space toggles playback, except when the focus is somewhere space already means
+something.
+
+### Recompute and redraw
+
+Measured with `scripts/perf.mjs`, driving the real controls at 1280px and
+reading the page's own `performance.measure("repaint")`. "repaint" is the
+synchronous work the brief budgets — recompute the field, paint the ImageData,
+`putImageData`. The budget is 100 ms.
+
+| change | repaint, median / p95 | at 4× CPU throttle |
+| --- | --- | --- |
+| year | 7.7 / 8.1 ms | 31.7 / 32.7 ms |
+| window | 7.9 / 7.9 ms | 31.9 / 32.0 ms |
+| baseline | 7.7 / 7.8 ms | 31.6 / 31.7 ms |
+| scale | 7.9 / 7.9 ms | 31.9 / 32.2 ms |
+| region | 8.2 / 8.4 ms | 33.6 / 35.3 ms |
+
+Worst case is 35 ms at 4× throttling, about a third of the budget. Region is the
+dearest because it also rebuilds the pixel lookup and redraws the coastlines.
 
 ### Rendering
 
