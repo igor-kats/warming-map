@@ -24,6 +24,7 @@
     "@types/d3-scale-chromatic": "^3.1.0",
     "@types/node": "^26.4.1",
     "@types/topojson-client": "^3.1.5",
+    "playwright": "^1.63.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.4",
     "vitest": "^3.2.4"

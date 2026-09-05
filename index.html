@@ -11,7 +11,37 @@
   </head>
   <body>
     <main id="app">
-      <noscript>This map is drawn in the browser and needs JavaScript.</noscript>
+      <header class="head">
+        <h1>Where the planet has warmed</h1>
+        <p class="subtitle" id="caption">Loading NASA GISTEMP…</p>
+      </header>
+
+      <figure class="map" id="map">
+        <canvas id="field"></canvas>
+        <canvas id="outlines"></canvas>
+      </figure>
+
+      <div class="legend" id="legend"></div>
+
+      <section class="notes">
+        <p>
+          Each cell is coloured by how much its temperature has changed: red where it is warmer than
+          the baseline, blue where it is cooler, pale where it has barely changed.
+        </p>
+        <p>
+          An anomaly is a difference, not a temperature. It says how far a place sits from its own
+          average, so cold places and warm places can be compared on the same scale.
+        </p>
+        <p>
+          Grey cells have no data. Before about 1950 the gaps are large and real — nobody was
+          measuring there. A gap is not a zero.
+        </p>
+        <p class="source" id="source"></p>
+        <p class="byline">
+          Built by Igor Kats ·
+          <a href="https://github.com/igorkats/warming-map">code on GitHub</a>
+        </p>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
