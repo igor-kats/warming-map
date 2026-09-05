@@ -1,0 +1,4 @@
+# Data build pipeline (scripts/build_gistemp.py). Python 3.12.
+numpy==2.3.3
+xarray==2025.9.0
+netCDF4==1.7.2

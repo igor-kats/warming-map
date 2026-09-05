@@ -1,0 +1,35 @@
+{
+  "name": "warming-map",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Animated map of where the planet has warmed most, with a user-chosen baseline and rolling window.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:data": "python scripts/build_gistemp.py"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "d3-scale-chromatic": "^3.1.0",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "^3.1.0",
+    "@types/d3-scale-chromatic": "^3.1.0",
+    "@types/node": "^26.4.1",
+    "@types/topojson-client": "^3.1.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
+  }
+}

@@ -1,0 +1,18 @@
+# node
+node_modules/
+dist/
+*.log
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# build cache (downloaded source NetCDF, ~200 MB — never committed)
+.cache/
+
+# editors / os
+.DS_Store
+.vscode/
+.idea/
