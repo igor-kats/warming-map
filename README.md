@@ -194,12 +194,22 @@ push to `main`, via `actions/deploy-pages`. The asset base path is taken from
 the repository name, so a project site served from `/<repo>/` resolves its data
 files correctly, and a fork or a rename keeps working.
 
-Nothing has been pushed. To publish:
+Pages has to be switched on once before the first deploy, or
+`actions/configure-pages` fails with "Get Pages site failed". Either flip
+Settings → Pages → Build and deployment → Source: **GitHub Actions**, or:
 
 ```sh
-gh repo create warming-map --public --source=. --remote=origin
-git push -u origin main
-# then: Settings → Pages → Build and deployment → Source: GitHub Actions
+gh api -X POST repos/<owner>/warming-map/pages -f build_type=workflow
+```
+
+The action's `enablement` input would do this from inside the workflow, but it
+needs `administration:write`, which a workflow's `GITHUB_TOKEN` cannot be
+granted — so it is a one-time manual step either way.
+
+Then every push to `main` builds and deploys:
+
+```sh
+git push origin main
 ```
 
 ## Automation
