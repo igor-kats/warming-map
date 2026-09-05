@@ -18,17 +18,23 @@
 
       <form class="controls" id="controls" aria-label="Map controls"></form>
 
-      <figure class="map" id="map">
+      <figure
+        class="map"
+        id="map"
+        tabindex="0"
+        aria-label="World map of temperature change. Move the pointer over a cell, or use the arrow keys, to read its figures."
+      >
         <canvas id="field"></canvas>
         <canvas id="outlines"></canvas>
+        <div class="panel" id="panel" role="status" aria-live="polite" hidden></div>
       </figure>
 
       <div class="legend" id="legend"></div>
 
       <section class="notes">
         <p>
-          Each cell is coloured by how much its temperature has changed: red where it is warmer than
-          the baseline, blue where it is cooler, pale where it has barely changed.
+          Red is warmer than the baseline you chose, blue is cooler, pale is barely changed. The
+          scale is symmetric, so +1 °C and −1 °C are the same distance from the middle.
         </p>
         <p>
           An anomaly is a difference, not a temperature. It says how far a place sits from its own
@@ -39,8 +45,12 @@
           measuring there. A gap is not a zero.
         </p>
         <p id="coverage"></p>
-        <p>Press space to play or pause. Every control is reachable with the keyboard.</p>
+        <p>
+          Hover or tap a cell for its own record. Everything works from the keyboard: tab to the
+          controls, arrow keys on the map, space to play or pause.
+        </p>
         <p class="source" id="source"></p>
+        <p>No cookies, no analytics, no third-party requests — the page loads only its own files.</p>
         <p class="byline">
           Built by Igor Kats ·
           <a href="https://github.com/igorkats/warming-map">code on GitHub</a>

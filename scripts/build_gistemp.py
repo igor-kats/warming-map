@@ -218,12 +218,30 @@ def read_grid(nc_path: Path, variable: str = "tempanomaly") -> tuple[Grid, int]:
     return Grid(lats=lats, lons=lons, years=years, annual=annual), dropped
 
 
+def write_gzip(payload: bytes, path: Path) -> None:
+    """Write payload gzipped, deterministically.
+
+    gzip embeds a modification time and the source filename in its header, so
+    the defaults would make every rebuild produce different bytes even when the
+    data is identical. Both are zeroed out.
+    """
+    with path.open("wb") as raw, gzip.GzipFile(
+        filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9
+    ) as out:
+        out.write(payload)
+
+
 def write_outputs(grid: Grid, out_dir: Path, source_sha: str, dropped: int) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     bin_path = out_dir / "gistemp_annual.bin"
+    gz_path = out_dir / "gistemp_annual.bin.gz"
     json_path = out_dir / "gistemp_annual.json"
 
-    quantise(grid.annual).tofile(bin_path)
+    payload = quantise(grid.annual).tobytes()
+    bin_path.write_bytes(payload)
+    # The site fetches the .gz; the plain .bin stays for clients without
+    # DecompressionStream, and so the file remains readable without a browser.
+    write_gzip(payload, gz_path)
 
     meta = {
         "lats": [round(float(v), 4) for v in grid.lats],
@@ -257,13 +275,15 @@ def summary_lines(grid: Grid, bin_path: Path, dropped: int) -> list[str]:
 
     cells = grid.lats.size * grid.lons.size
     size_mb = bin_path.stat().st_size / 1e6
+    gz_path = bin_path.parent / f"{bin_path.name}.gz"
+    gz_mb = gz_path.stat().st_size / 1e6 if gz_path.exists() else float("nan")
     decade_text = "  ".join(f"{d}s {pct:.0f}%" for d, pct in decades)
 
     return [
         f"years      {int(grid.years[0])}-{latest} ({grid.years.size} years, "
         f"{dropped} trailing incomplete year(s) dropped)",
         f"grid       {grid.lats.size} lat x {grid.lons.size} lon = {cells} cells, "
-        f"{cells * grid.years.size} cell-years, {size_mb:.2f} MB raw",
+        f"{cells * grid.years.size} cell-years, {size_mb:.2f} MB raw / {gz_mb:.2f} MB gzip",
         f"missing    {decade_text}",
         f"global     {latest} anomaly vs {BASELINE} = {means[-1]:+.2f} degC "
         f"(area-weighted, cos-lat)",
@@ -294,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     bin_path, json_path = write_outputs(grid, args.out_dir, sha256(nc_path), dropped)
     for line in summary_lines(grid, bin_path, dropped):
         print(line)
-    print(f"wrote {bin_path} and {json_path}", file=sys.stderr)
+    print(f"wrote {bin_path}, {bin_path}.gz and {json_path}", file=sys.stderr)
     return 0
 
 

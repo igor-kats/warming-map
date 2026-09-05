@@ -11,6 +11,8 @@
  * a bad `w` does not cost you a good `y`.
  */
 
+import { PALETTE_OPTIONS, type PaletteName } from "./palette.js";
+
 export type Region = "world" | "eu" | "na";
 export type WindowYears = 1 | 5 | 10;
 export type PaletteLimit = 1 | 2 | 3 | 4;
@@ -22,6 +24,7 @@ export interface ViewState {
   readonly year: number;
   readonly region: Region;
   readonly limit: PaletteLimit;
+  readonly palette: PaletteName;
 }
 
 /** The span of years the data file actually covers. */
@@ -55,6 +58,7 @@ export const DEFAULTS = {
   year: 2024,
   region: "world",
   limit: 2,
+  palette: "rdbu",
 } as const satisfies ViewState;
 
 /**
@@ -118,6 +122,9 @@ export function parseHash(hash: string, limits: RecordLimits): ViewState {
   const rawRegion = params.get("r");
   const region: Region = isOneOf(REGION_OPTIONS, rawRegion) ? rawRegion : fallback.region;
 
+  const rawPalette = params.get("c");
+  const palette: PaletteName = isOneOf(PALETTE_OPTIONS, rawPalette) ? rawPalette : fallback.palette;
+
   const rawYear = params.get("y");
   const year = /^-?\d{1,4}$/.test(rawYear ?? "") ? Number(rawYear) : fallback.year;
 
@@ -128,6 +135,7 @@ export function parseHash(hash: string, limits: RecordLimits): ViewState {
     year: clampYear(year, limits, windowYears),
     region,
     limit,
+    palette,
   };
 }
 
@@ -139,6 +147,7 @@ export function serialiseHash(state: ViewState): string {
     ["y", String(state.year)],
     ["r", state.region],
     ["p", String(state.limit)],
+    ["c", state.palette],
   ]);
   return `#${params.toString()}`;
 }

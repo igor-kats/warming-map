@@ -7,6 +7,7 @@
  * state: it renders whatever it is given and reports what the reader asked for.
  */
 
+import { PALETTE_LABELS, PALETTE_OPTIONS, type PaletteName } from "./palette.js";
 import {
   BASELINE_PRESETS,
   LIMIT_OPTIONS,
@@ -163,6 +164,15 @@ export function mountControls(host: HTMLElement, options: ControlsOptions): Cont
   );
   scaleGroup.body.append(scaleRadios.root);
 
+  const paletteGroup = group("Colours");
+  const paletteRadios = radios<PaletteName>(
+    "palette",
+    PALETTE_OPTIONS,
+    (value) => PALETTE_LABELS[value],
+    (value) => onChange({ palette: value }),
+  );
+  paletteGroup.body.append(paletteRadios.root);
+
   const regionGroup = group("Region");
   const regionRadios = radios<Region>(
     "region",
@@ -207,7 +217,14 @@ export function mountControls(host: HTMLElement, options: ControlsOptions): Cont
   const playbar = el("div", "playbar");
   playbar.append(play, speedWrap, slider, readout);
 
-  host.append(baseline.root, windowGroup.root, scaleGroup.root, regionGroup.root, playbar);
+  host.append(
+    baseline.root,
+    windowGroup.root,
+    scaleGroup.root,
+    paletteGroup.root,
+    regionGroup.root,
+    playbar,
+  );
 
   return {
     sync(state) {
@@ -228,6 +245,7 @@ export function mountControls(host: HTMLElement, options: ControlsOptions): Cont
       windowRadios.select(state.windowYears);
       scaleRadios.select(state.limit);
       regionRadios.select(state.region);
+      paletteRadios.select(state.palette);
     },
 
     setPlaying(playing) {

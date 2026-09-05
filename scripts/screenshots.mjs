@@ -11,6 +11,8 @@ const OUT = "docs/screenshots";
 const TARGETS = [
   { name: "world-1280", width: 1280, height: 800, dpr: 1 },
   { name: "world-390", width: 390, height: 844, dpr: 2 },
+  // The per-cell panel only appears under a pointer, so this one hovers first.
+  { name: "panel-1280", width: 1280, height: 800, dpr: 1, hover: [0.68, 0.24] },
 ];
 
 await mkdir(OUT, { recursive: true });
@@ -49,8 +51,14 @@ for (const target of TARGETS) {
     };
   });
 
+  if (target.hover) {
+    const box = await page.locator("#map").boundingBox();
+    await page.mouse.move(box.x + box.width * target.hover[0], box.y + box.height * target.hover[1]);
+    await page.waitForTimeout(250);
+  }
+
   const file = `${OUT}/${target.name}.png`;
-  await page.screenshot({ path: file, fullPage: true });
+  await page.screenshot({ path: file, fullPage: !target.hover });
 
   console.log(`\n${target.name}  ${target.width}x${target.height} @${target.dpr}x  -> ${file}`);
   console.log(`  requests            ${metrics.requests}`);

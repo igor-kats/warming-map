@@ -12,10 +12,12 @@ import { feature } from "topojson-client";
 import { mountControls, Player } from "./controls.js";
 import { buildPrefixSums, computeField, fieldGlobalMean, DEFAULT_MIN_COVERAGE } from "./compute.js";
 import { loadGistemp } from "./data.js";
-import { buildPalette, MISSING_RGB } from "./palette.js";
+import { inspectCell, renderPanel } from "./inspect.js";
+import { buildPalette, MISSING_RGB, type PaletteName } from "./palette.js";
 import {
   assertPseudocylindrical,
   buildLookup,
+  OUTSIDE,
   drawOutlines,
   paintField,
   projectionFor,
@@ -119,7 +121,10 @@ async function start(): Promise<void> {
   const [data, land] = await Promise.all([loadGistemp(base), loadLand(base)]);
 
   const prefix = buildPrefixSums(data);
-  const lut = buildPalette();
+  let lut = buildPalette(parseHash(window.location.hash, {
+    firstYear: data.meta.years[0] ?? 0,
+    lastYear: data.meta.years[data.nYears - 1] ?? 0,
+  }).palette);
   const limits: RecordLimits = {
     firstYear: data.meta.years[0] ?? 0,
     lastYear: data.meta.years[data.nYears - 1] ?? 0,
@@ -148,7 +153,12 @@ async function start(): Promise<void> {
   let lookup: Int32Array | null = null;
   let image: ImageData | null = null;
   let layoutKey = "";
-  let currentLimit = -1;
+  let legendKey = "";
+  let paletteName: PaletteName = state.palette;
+
+  const panel = element("panel");
+  // The cell under the pointer, or the one the keyboard cursor sits on.
+  let hovered: number | null = null;
 
   function layout(): boolean {
     if (host.clientWidth < 2 || host.clientHeight < 2) return false;
@@ -179,8 +189,45 @@ async function start(): Promise<void> {
     return true;
   }
 
+  function showPanel(cell: number): void {
+    hovered = cell;
+    renderPanel(
+      panel,
+      inspectCell(data, prefix, state, DEFAULT_MIN_COVERAGE, cell),
+      data,
+      state,
+      lut,
+      DEFAULT_MIN_COVERAGE,
+    );
+    panel.hidden = false;
+  }
+
+  function hidePanel(): void {
+    hovered = null;
+    panel.hidden = true;
+  }
+
+  /** The cell under a client-space point, via the lookup already built for the canvas. */
+  function cellAt(clientX: number, clientY: number): number | null {
+    if (!lookup) return null;
+    const box = fieldCanvas.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return null;
+
+    const x = Math.floor(((clientX - box.left) / box.width) * fieldCanvas.width);
+    const y = Math.floor(((clientY - box.top) / box.height) * fieldCanvas.height);
+    if (x < 0 || y < 0 || x >= fieldCanvas.width || y >= fieldCanvas.height) return null;
+
+    const cell = lookup[y * fieldCanvas.width + x];
+    return cell === undefined || cell === OUTSIDE ? null : cell;
+  }
+
   function repaint(): void {
     if (!layout() || !lookup || !image) return;
+
+    if (state.palette !== paletteName) {
+      paletteName = state.palette;
+      lut = buildPalette(paletteName);
+    }
 
     performance.mark("repaint:start");
 
@@ -196,10 +243,14 @@ async function start(): Promise<void> {
     fieldCanvas.getContext("2d")?.putImageData(image, 0, 0);
 
     caption.textContent = describe(state, fieldGlobalMean(field, data.meta.lats, data.nLons));
-    if (state.limit !== currentLimit) {
-      currentLimit = state.limit;
+
+    const key = `${state.limit}:${state.palette}`;
+    if (key !== legendKey) {
+      legendKey = key;
       renderLegend(legend, lut, state.limit);
     }
+
+    if (hovered !== null) showPanel(hovered);
 
     performance.mark("repaint:end");
     performance.measure("repaint", "repaint:start", "repaint:end");
@@ -257,6 +308,82 @@ async function start(): Promise<void> {
     event.preventDefault();
     player.toggle();
     controls.setPlaying(player.playing);
+  });
+
+  // --- inspecting a cell --------------------------------------------------
+
+  host.addEventListener("pointermove", (event) => {
+    const cell = cellAt(event.clientX, event.clientY);
+    if (cell === null) hidePanel();
+    else {
+      showPanel(cell);
+      placePanel(event.clientX, event.clientY);
+    }
+  });
+
+  host.addEventListener("pointerleave", (event) => {
+    // A tap should leave the panel up to be read; only a mouse leaving clears it.
+    if (event.pointerType === "mouse") hidePanel();
+  });
+
+  host.addEventListener("pointerdown", (event) => {
+    const cell = cellAt(event.clientX, event.clientY);
+    if (cell === null) hidePanel();
+    else {
+      showPanel(cell);
+      placePanel(event.clientX, event.clientY);
+    }
+  });
+
+  /** Keep the panel beside the pointer but inside the figure. */
+  function placePanel(clientX: number, clientY: number): void {
+    const box = host.getBoundingClientRect();
+    const width = panel.offsetWidth || 240;
+    const height = panel.offsetHeight || 130;
+    const margin = 12;
+
+    let left = clientX - box.left + margin;
+    let top = clientY - box.top + margin;
+    if (left + width > box.width) left = clientX - box.left - width - margin;
+    if (top + height > box.height) top = clientY - box.top - height - margin;
+
+    panel.style.left = `${Math.max(0, Math.min(left, box.width - width))}px`;
+    panel.style.top = `${Math.max(0, Math.min(top, box.height - height))}px`;
+  }
+
+  /**
+   * The map is focusable so the panel is reachable without a pointer: arrows
+   * walk the grid a cell at a time, Escape closes it.
+   */
+  host.addEventListener("keydown", (event) => {
+    const step: Record<string, [number, number]> = {
+      ArrowUp: [1, 0],
+      ArrowDown: [-1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    };
+
+    if (event.key === "Escape" && hovered !== null) {
+      hidePanel();
+      event.preventDefault();
+      return;
+    }
+
+    const move = step[event.key];
+    if (!move) return;
+    event.preventDefault();
+
+    const start = hovered ?? Math.floor(data.nLats / 2) * data.nLons + Math.floor(data.nLons / 2);
+    const lat = Math.min(data.nLats - 1, Math.max(0, Math.floor(start / data.nLons) + move[0]));
+    const lon = (((start % data.nLons) + move[1]) % data.nLons + data.nLons) % data.nLons;
+
+    showPanel(lat * data.nLons + lon);
+    panel.style.left = "";
+    panel.style.top = "";
+  });
+
+  host.addEventListener("blur", () => {
+    if (hovered !== null) hidePanel();
   });
 
   new ResizeObserver(() => repaint()).observe(host);

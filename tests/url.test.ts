@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PALETTE_OPTIONS } from "../src/palette.js";
 import {
   BASELINE_PRESETS,
   DEFAULTS,
@@ -30,6 +31,7 @@ describe("defaults", () => {
       year: 2024,
       region: "world",
       limit: 2,
+      palette: "rdbu",
     });
   });
 
@@ -47,9 +49,10 @@ describe("serialiseHash", () => {
       year: 2016,
       region: "eu",
       limit: 2,
+      palette: "rdbu",
     };
 
-    expect(serialiseHash(state)).toBe("#b=1951-1980&w=5&y=2016&r=eu&p=2");
+    expect(serialiseHash(state)).toBe("#b=1951-1980&w=5&y=2016&r=eu&p=2&c=rdbu");
   });
 });
 
@@ -64,6 +67,7 @@ describe("round trip", () => {
       year: 2016,
       region: "eu",
       limit: 2,
+      palette: "rdbu", // an older link without `c` still opens
     });
   });
 
@@ -75,24 +79,27 @@ describe("round trip", () => {
         for (const region of REGION_OPTIONS) {
           for (const limit of LIMIT_OPTIONS) {
             for (const year of [1900, 1980, 2016, 2025]) {
-              const state: ViewState = {
-                baselineStart,
-                baselineEnd,
-                windowYears,
-                year,
-                region,
-                limit,
-              };
+              for (const palette of PALETTE_OPTIONS) {
+                const state: ViewState = {
+                  baselineStart,
+                  baselineEnd,
+                  windowYears,
+                  year,
+                  region,
+                  limit,
+                  palette,
+                };
 
-              expect(parseHash(serialiseHash(state), limits)).toEqual(state);
-              checked++;
+                expect(parseHash(serialiseHash(state), limits)).toEqual(state);
+                checked++;
+              }
             }
           }
         }
       }
     }
 
-    expect(checked).toBe(3 * 3 * 3 * 4 * 4);
+    expect(checked).toBe(3 * 3 * 3 * 4 * 4 * 2);
   });
 
   it("accepts a hash with or without the leading #", () => {
@@ -125,6 +132,8 @@ describe("invalid input falls back silently", () => {
     ["b=1951-2999", "baselineStart"],
     ["b=nope", "baselineStart"],
     ["y=nineteen", "year"],
+    ["c=viridis", "palette"],
+    ["c=", "palette"],
   ])("rejects %s", (fragment) => {
     expect(parseHash(`#${fragment}`, limits)).toEqual(defaults);
   });

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -369,3 +370,49 @@ def test_the_build_is_deterministic(synthetic_nc: Path, tmp_path: Path):
 def test_download_refuses_a_url_that_is_not_gzipped(tmp_path: Path):
     with pytest.raises(ValueError, match="gzipped NetCDF"):
         bg.download("https://example.invalid/plain.nc", tmp_path)
+
+
+# --------------------------------------------------------------------------
+# the pre-compressed copy
+# --------------------------------------------------------------------------
+
+
+def test_the_build_writes_a_gzip_beside_the_binary(synthetic_nc: Path, tmp_path: Path):
+    out_dir = tmp_path / "out"
+    bg.main(["--input", str(synthetic_nc), "--out-dir", str(out_dir)])
+
+    gz_path = out_dir / "gistemp_annual.bin.gz"
+    assert gz_path.exists()
+    assert gz_path.stat().st_size < (out_dir / "gistemp_annual.bin").stat().st_size
+
+
+def test_the_gzip_inflates_back_to_the_binary(synthetic_nc: Path, tmp_path: Path):
+    out_dir = tmp_path / "out"
+    bg.main(["--input", str(synthetic_nc), "--out-dir", str(out_dir)])
+
+    with gzip.open(out_dir / "gistemp_annual.bin.gz", "rb") as handle:
+        inflated = handle.read()
+
+    assert inflated == (out_dir / "gistemp_annual.bin").read_bytes()
+
+
+def test_the_gzip_is_deterministic(synthetic_nc: Path, tmp_path: Path):
+    """gzip stamps an mtime into its header; two builds must still match byte for byte."""
+    first, second = tmp_path / "a", tmp_path / "b"
+    bg.main(["--input", str(synthetic_nc), "--out-dir", str(first)])
+    bg.main(["--input", str(synthetic_nc), "--out-dir", str(second)])
+
+    assert (first / "gistemp_annual.bin.gz").read_bytes() == (
+        second / "gistemp_annual.bin.gz"
+    ).read_bytes()
+
+
+def test_the_gzip_header_carries_no_timestamp_or_name(synthetic_nc: Path, tmp_path: Path):
+    out_dir = tmp_path / "out"
+    bg.main(["--input", str(synthetic_nc), "--out-dir", str(out_dir)])
+
+    header = (out_dir / "gistemp_annual.bin.gz").read_bytes()[:10]
+
+    assert header[:2] == b"\x1f\x8b"  # gzip magic, which the page checks for
+    assert header[4:8] == b"\x00\x00\x00\x00"  # mtime zeroed
+    assert header[3] & 0x08 == 0  # no original-filename field

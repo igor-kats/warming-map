@@ -6,11 +6,17 @@ No accounts, no tracking, no backend. See [the brief](docs/2026-09-05_warming-ma
 
 ## Status
 
-Step 3 of 4: the data pipeline, the map, and the controls — baseline, window,
-year, playback, colour scale and region, all recomputed in the browser and all
-carried in the URL. The hover panel and the Pages deploy are step 4.
+All four steps of the brief are done: the data pipeline, the map, the controls,
+the per-cell panel, and the GitHub Pages deploy. Nothing is deployed yet — the
+repo has no remote; see **Deploying** below.
 
 ![The default view at 1280px](docs/screenshots/world-1280.png)
+
+Hover or tap any cell for its own record — coordinates, its change against the
+baseline, and a sparkline of every year with the baseline period shaded. Arrow
+keys do the same thing without a pointer.
+
+![The per-cell panel](docs/screenshots/panel-1280.png)
 
 ### What the default view shows
 
@@ -89,6 +95,13 @@ the committed binary, against NASA's published GISTEMP values:
 Within the ±0.05 °C the brief asks for. The trend over 1980–2025 is
 **+0.211 °C/decade**, matching the expected ≈ +0.2 °C/decade.
 
+### Accessibility
+
+Lighthouse accessibility: **100**, no failing audits. Every control is a native
+input, so keyboard behaviour and screen-reader semantics come from the browser.
+The map itself is a tab stop: arrow keys walk the grid cell by cell and Escape
+closes the panel, so the per-cell figures are reachable without a pointer.
+
 ### Licences
 
 Data: NASA GISTEMP v4 (public domain); ERA5 © ECMWF/Copernicus (CC BY 4.0) in v2; EDGAR (European Commission JRC) in v3. Code: MIT.
@@ -97,12 +110,23 @@ Cite GISTEMP as: GISTEMP Team, *GISS Surface Temperature Analysis (GISTEMP), ver
 
 ### Transfer size
 
-The production build is **4.83 MB raw, 1.86 MB gzipped**, nearly all of it the
-data file. `vite preview` compresses the text assets but not the `.bin`, and
-GitHub Pages may do the same for `application/octet-stream`. If it does, first
-load is 4.7 MB rather than the ~2 MB the brief budgets for, and the fix at
-deploy time is to ship the binary pre-compressed and inflate it with
-`DecompressionStream` in the browser. Worth settling in step 4.
+**1.91 MB on first load, over 6 requests** — measured in Chromium against
+`vite preview` serving the production build. The brief's budget is 3 MB.
+
+The grid is 4.73 MB of int16 and a static host will not necessarily compress
+`application/octet-stream`, so the build ships a `gistemp_annual.bin.gz`
+(1.86 MB) beside the plain `.bin` and the page inflates it itself with
+`DecompressionStream`. Three cases are handled, and all three are tested in a
+real browser:
+
+| the host… | what happens |
+| --- | --- |
+| serves the `.gz` as opaque bytes | the page inflates it — 1.86 MB over the wire |
+| sets `Content-Encoding: gzip` | the browser has already inflated it; the page checks the gzip magic number rather than inflating on faith |
+| — but the browser has no `DecompressionStream` | falls back to the plain `.bin` |
+
+The plain `.bin` is kept for that fallback, and so the file stays readable
+without a browser.
 
 ### Controls and URL state
 
@@ -144,6 +168,15 @@ synchronous work the brief budgets — recompute the field, paint the ImageData,
 Worst case is 35 ms at 4× throttling, about a third of the budget. Region is the
 dearest because it also rebuilds the pixel lookup and redraws the coastlines.
 
+### Colours
+
+RdBu by default, because that is what people expect for temperature. PuOr is
+the colour-blind-safe alternative: red and blue are the pair that deuteranopes
+and protanopes confuse most readily, whereas purple and orange separate on the
+blue–yellow axis that stays intact in the common forms of colour blindness.
+Cells with no data take a grey deliberately darker than either ramp's centre,
+so "no data" cannot be read as "no change"; both appear in the legend.
+
 ### Rendering
 
 Each frame is one `ImageData` filled through a pixel → cell lookup built once
@@ -153,6 +186,21 @@ costs ~500 ms for a 3.3 Mpx canvas; because Equal Earth is pseudocylindrical
 the lookup inverts once per row instead, at 1.4 ms. `assertPseudocylindrical`
 fails loudly if a projection that breaks the assumption is swapped in, and a
 test checks the fast path against the slow per-pixel inverse.
+
+## Deploying
+
+`.github/workflows/deploy.yml` builds and publishes to GitHub Pages on every
+push to `main`, via `actions/deploy-pages`. The asset base path is taken from
+the repository name, so a project site served from `/<repo>/` resolves its data
+files correctly, and a fork or a rename keeps working.
+
+Nothing has been pushed. To publish:
+
+```sh
+gh repo create warming-map --public --source=. --remote=origin
+git push -u origin main
+# then: Settings → Pages → Build and deployment → Source: GitHub Actions
+```
 
 ## Automation
 

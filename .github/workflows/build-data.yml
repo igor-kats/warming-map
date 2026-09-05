@@ -56,6 +56,8 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/data/gistemp_annual.bin public/data/gistemp_annual.json
+          # The .gz is what the page actually fetches, so it must travel with the .bin.
+          git add public/data/gistemp_annual.bin public/data/gistemp_annual.bin.gz \
+                  public/data/gistemp_annual.json
           git commit -m "data: rebuild GISTEMP annual means ($(date -u +%Y-%m-%d))"
           git push
