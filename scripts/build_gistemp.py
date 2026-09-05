@@ -38,6 +38,7 @@ SCALE = 100  # stored value = anomaly degC * SCALE
 MISSING = -32768  # int16 sentinel
 INT16_MIN, INT16_MAX = -32767, 32767  # MISSING is reserved
 MIN_MONTHS = 9  # a cell-year needs at least this many months present
+MONTHS_PER_YEAR = 12  # the final year is kept only if the source covers all of them
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT_DIR = REPO_ROOT / "public" / "data"
@@ -78,10 +79,30 @@ def annual_means(
     return years, out
 
 
-def drop_trailing_empty_years(years: np.ndarray, annual: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
-    """Drop trailing years with no valid cell at all (the in-progress current year)."""
+def drop_incomplete_final_years(
+    years: np.ndarray,
+    annual: np.ndarray,
+    month_years: np.ndarray,
+    month_numbers: np.ndarray,
+    months_required: int = MONTHS_PER_YEAR,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Drop trailing years that the source does not cover for all twelve months.
+
+    This overrides MIN_MONTHS at the end of the record. A part-finished current
+    year averages only the months that have happened, so its "annual" mean is
+    seasonally biased -- warm if the file ends in summer, cold if in winter --
+    and must never be published as an annual value, however many cells cleared
+    the nine-month bar.
+
+    Interior years are untouched: only the tail is trimmed, and trimming stops
+    at the first year the source covers completely.
+    """
     keep = years.size
-    while keep > 0 and not np.any(np.isfinite(annual[keep - 1])):
+    while keep > 0:
+        year = years[keep - 1]
+        covered = np.unique(month_numbers[month_years == year]).size
+        if covered >= months_required:
+            break
         keep -= 1
     return years[:keep], annual[:keep], years.size - keep
 
@@ -180,18 +201,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_grid(nc_path: Path, variable: str = "tempanomaly") -> Grid:
+def read_grid(nc_path: Path, variable: str = "tempanomaly") -> tuple[Grid, int]:
+    """Read the source file into annual means, trimming any part-covered final year."""
     import xarray as xr
 
     with xr.open_dataset(nc_path, decode_times=True) as ds:
         da = ds[variable].transpose("time", "lat", "lon")
         monthly = da.values.astype(np.float64)
         month_years = da["time"].dt.year.values.astype(np.int64)
+        month_numbers = da["time"].dt.month.values.astype(np.int64)
         lats = ds["lat"].values.astype(np.float64)
         lons = ds["lon"].values.astype(np.float64)
 
     years, annual = annual_means(monthly, month_years)
-    return Grid(lats=lats, lons=lons, years=years, annual=annual)
+    years, annual, dropped = drop_incomplete_final_years(years, annual, month_years, month_numbers)
+    return Grid(lats=lats, lons=lons, years=years, annual=annual), dropped
 
 
 def write_outputs(grid: Grid, out_dir: Path, source_sha: str, dropped: int) -> tuple[Path, Path]:
@@ -212,6 +236,7 @@ def write_outputs(grid: Grid, out_dir: Path, source_sha: str, dropped: int) -> t
         "units": "degrees Celsius anomaly, stored as value * scale",
         "baseline": BASELINE,
         "min_months_per_year": MIN_MONTHS,
+        "final_year_requires_months": MONTHS_PER_YEAR,
         "dropped_trailing_incomplete_years": dropped,
         "source": SOURCE_NAME,
         "source_url": SOURCE_URL,
@@ -260,8 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     nc_path = args.input if args.input else download(args.url, args.cache_dir)
-    grid = read_grid(nc_path, args.variable)
-    grid.years, grid.annual, dropped = drop_trailing_empty_years(grid.years, grid.annual)
+    grid, dropped = read_grid(nc_path, args.variable)
 
     if grid.years.size == 0:
         print("no complete years in the source file", file=sys.stderr)

@@ -38,8 +38,15 @@ nothing produces no commit.
 `[year][lat][lon]`, where the stored integer is the anomaly in °C × 100 and
 `-32768` means missing. `gistemp_annual.json` carries the coordinates, the year
 list, the scale and sentinel, and the provenance. Annual means come from the
-monthly source; a cell-year needs at least 9 present months, otherwise it is
-missing. **Pre-1950 gaps are real gaps, not zeros.**
+monthly source under two rules:
+
+- a cell-year needs at least 9 present months, otherwise that cell-year is missing;
+- the **last** year in the source is kept only if the file covers all 12 of its
+  months, whatever the per-cell counts say. A part-finished year averages only
+  the months that have happened, so its mean is seasonally biased and is never
+  published as an annual value.
+
+**Pre-1950 gaps are real gaps, not zeros.**
 
 Values are anomalies against 1951–1980, as the source publishes them. A
 user-chosen baseline is a re-centring of those anomalies, not a conversion to

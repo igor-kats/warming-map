@@ -156,25 +156,102 @@ def test_missing_by_decade_counts_cell_years():
     assert bg.missing_by_decade(years, annual) == [(1880, 25.0), (1890, 100.0)]
 
 
-def test_drop_trailing_empty_years():
-    years = np.array([2000, 2001, 2002])
-    annual = np.array([[[1.0]], [[2.0]], [[np.nan]]])
+# --------------------------------------------------------------------------
+# the final-year coverage rule
+# --------------------------------------------------------------------------
 
-    kept_years, kept, dropped = bg.drop_trailing_empty_years(years, annual)
 
-    assert kept_years.tolist() == [2000, 2001]
-    assert kept.shape == (2, 1, 1)
+def month_axis(spans: list[tuple[int, int]]) -> tuple[np.ndarray, np.ndarray]:
+    """Build (month_years, month_numbers) from [(year, months_present), ...]."""
+    years, months = [], []
+    for year, count in spans:
+        years.extend([year] * count)
+        months.extend(range(1, count + 1))
+    return np.array(years, dtype=np.int64), np.array(months, dtype=np.int64)
+
+
+def test_a_final_year_short_of_twelve_months_is_dropped():
+    years = np.array([2000, 2001])
+    annual = np.array([[[1.0]], [[2.0]]])  # both years have data
+    month_years, month_numbers = month_axis([(2000, 12), (2001, 9)])
+
+    kept_years, kept, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
+
+    assert kept_years.tolist() == [2000]
+    assert kept.shape == (1, 1, 1)
     assert dropped == 1
 
 
-def test_drop_trailing_empty_years_keeps_a_complete_tail():
+def test_a_final_year_with_twelve_months_is_kept():
     years = np.array([2000, 2001])
-    annual = np.array([[[np.nan]], [[2.0]]])
+    annual = np.array([[[1.0]], [[2.0]]])
+    month_years, month_numbers = month_axis([(2000, 12), (2001, 12)])
 
-    kept_years, _, dropped = bg.drop_trailing_empty_years(years, annual)
+    kept_years, _, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
 
     assert kept_years.tolist() == [2000, 2001]
     assert dropped == 0
+
+
+def test_the_rule_overrides_min_months():
+    """Eleven months would clear MIN_MONTHS for every cell; the tail rule still drops it."""
+    years = np.array([2000, 2001])
+    annual = np.array([[[1.0]], [[2.0]]])
+    month_years, month_numbers = month_axis([(2000, 12), (2001, 11)])
+
+    kept_years, _, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
+
+    assert kept_years.tolist() == [2000]
+    assert dropped == 1
+
+
+def test_a_fully_missing_but_fully_covered_final_year_is_kept():
+    """Coverage is a property of the time axis, not of how much data survived."""
+    years = np.array([2000, 2001])
+    annual = np.array([[[1.0]], [[np.nan]]])
+    month_years, month_numbers = month_axis([(2000, 12), (2001, 12)])
+
+    kept_years, _, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
+
+    assert kept_years.tolist() == [2000, 2001]
+    assert dropped == 0
+
+
+def test_trimming_stops_at_the_first_complete_year():
+    """An interior year the source covers only partly is left alone."""
+    years = np.array([2000, 2001, 2002])
+    annual = np.array([[[1.0]], [[2.0]], [[3.0]]])
+    month_years, month_numbers = month_axis([(2000, 7), (2001, 12), (2002, 4)])
+
+    kept_years, _, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
+
+    assert kept_years.tolist() == [2000, 2001]
+    assert dropped == 1
+
+
+def test_duplicate_timesteps_do_not_fake_coverage():
+    """Twelve rows spanning only six distinct months is not a covered year."""
+    years = np.array([2000])
+    annual = np.array([[[1.0]]])
+    month_years = np.full(12, 2000, dtype=np.int64)
+    month_numbers = np.tile(np.arange(1, 7), 2).astype(np.int64)
+
+    kept_years, _, dropped = bg.drop_incomplete_final_years(
+        years, annual, month_years, month_numbers
+    )
+
+    assert kept_years.tolist() == []
+    assert dropped == 1
 
 
 # --------------------------------------------------------------------------
@@ -186,20 +263,19 @@ SYNTH_LONS = [-90.0, 0.0, 90.0]
 SYNTH_YEARS = list(range(1980, 1990))
 
 
-@pytest.fixture
-def synthetic_nc(tmp_path: Path) -> Path:
+def write_synthetic_nc(path: Path, final_months: int) -> Path:
     """A tiny GISTEMP-shaped file: 3x3 cells, 10 years, a known linear warming trend.
 
-    Cell values are 0.02 degC/year everywhere, so the area-weighted global trend
+    Cell values rise 0.02 degC/year everywhere, so the area-weighted global trend
     must come back as +0.2 degC/decade. One cell-year is deliberately short of
-    months, and the final year is deliberately incomplete.
+    months, and `final_months` sets how much of the last year the time axis covers.
     """
     xr = pytest.importorskip("xarray")
     pytest.importorskip("netCDF4")
 
     times, values = [], []
     for year in SYNTH_YEARS:
-        months = 12 if year != SYNTH_YEARS[-1] else 3  # last year incomplete
+        months = final_months if year == SYNTH_YEARS[-1] else 12
         for month in range(1, months + 1):
             times.append(np.datetime64(f"{year}-{month:02d}-15"))
             frame = np.full((3, 3), 0.02 * (year - SYNTH_YEARS[0]))
@@ -213,9 +289,42 @@ def synthetic_nc(tmp_path: Path) -> Path:
         coords={"time": np.array(times), "lat": SYNTH_LATS, "lon": SYNTH_LONS},
         name="tempanomaly",
     )
-    path = tmp_path / "synthetic.nc"
     da.to_dataset().to_netcdf(path)
     return path
+
+
+@pytest.fixture
+def synthetic_nc(tmp_path: Path) -> Path:
+    """The default file: the last year has nine months, which MIN_MONTHS alone would accept."""
+    return write_synthetic_nc(tmp_path / "synthetic.nc", final_months=9)
+
+
+def build_meta(nc_path: Path, out_dir: Path) -> dict:
+    assert bg.main(["--input", str(nc_path), "--out-dir", str(out_dir)]) == 0
+    return json.loads((out_dir / "gistemp_annual.json").read_text())
+
+
+def test_a_nine_month_final_year_is_dropped(tmp_path: Path):
+    """Nine months clears MIN_MONTHS, so only the tail rule can reject this year."""
+    nc_path = write_synthetic_nc(tmp_path / "nine.nc", final_months=9)
+
+    meta = build_meta(nc_path, tmp_path / "out")
+
+    assert meta["years"] == SYNTH_YEARS[:-1]
+    assert meta["years"][-1] == 1988
+    assert meta["dropped_trailing_incomplete_years"] == 1
+    assert meta["shape"] == [9, 3, 3]
+
+
+def test_a_twelve_month_final_year_is_kept(tmp_path: Path):
+    nc_path = write_synthetic_nc(tmp_path / "twelve.nc", final_months=12)
+
+    meta = build_meta(nc_path, tmp_path / "out")
+
+    assert meta["years"] == SYNTH_YEARS
+    assert meta["years"][-1] == 1989
+    assert meta["dropped_trailing_incomplete_years"] == 0
+    assert meta["shape"] == [10, 3, 3]
 
 
 def test_end_to_end_writes_the_expected_binary(synthetic_nc: Path, tmp_path: Path, capsys):
